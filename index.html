@@ -29,32 +29,19 @@
       doc: function(path){ return root.doc(path); }
     };
   }
-  function gate(){
-    var box = document.createElement("div");
-    box.style.cssText = "position:fixed;inset:0;z-index:99999;background:#fffdf6;display:flex;align-items:center;justify-content:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Noto Sans TC',sans-serif;";
-    box.innerHTML =
-      '<div style="width:100%;max-width:340px;text-align:center;color:#272727;">'+
-        '<div style="font-size:26px;font-weight:800;margin-bottom:6px;">回家吧</div>'+
-        '<div style="font-size:14px;color:#726a5c;margin-bottom:22px;line-height:1.7;">登入後，換手機或清除瀏覽器，資料也不會不見。</div>'+
-        '<button id="gateGoogle" style="width:100%;padding:13px;border-radius:12px;border:none;background:#272727;color:#fff;font-size:15px;font-weight:700;margin-bottom:0;">用 Google 登入</button>'+
-        '<div id="gateMsg" style="font-size:12px;color:#b3261e;margin-top:12px;min-height:16px;"></div>'+
-      '</div>';
-    document.body.appendChild(box);
-    function fail(e){ box.querySelector("#gateMsg").textContent = "登入失敗，請再試一次"; if(window.console) console.log(e); }
-    box.querySelector("#gateGoogle").onclick = function(){
-      auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(fail);
-    };
-    return box;
-  }
-  var gateBox = null;
+  var firstResolve, first = new Promise(function(r){ firstResolve = r; });
+  window.__fbAuth = {
+    user: null,
+    first: first,
+    onChange: null,
+    signIn: function(){ return auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); },
+    signOut: function(){ return auth.signOut(); }
+  };
   auth.onAuthStateChanged(function(user){
-    if(user){
-      if(gateBox){ gateBox.remove(); gateBox = null; }
-      resolveDb(makeDb(user));
-    } else if(!gateBox){
-      if(document.body) gateBox = gate();
-      else document.addEventListener("DOMContentLoaded", function(){ if(!gateBox) gateBox = gate(); });
-    }
+    window.__fbAuth.user = user || null;
+    if(user) resolveDb(makeDb(user));
+    firstResolve(user ? "in" : "out");
+    if(typeof window.__fbAuth.onChange === "function") window.__fbAuth.onChange(user || null);
   });
   window.claude = window.claude || {};
   window.claude.use = function(name){ return name === "db" ? ready : Promise.resolve(null); };
@@ -1140,6 +1127,12 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
       <h2>歡迎使用回家吧</h2>
     </div>
     <div class="modal-body">
+      <div class="field" id="obLoginField" hidden>
+        <label>登入</label>
+        <button type="button" class="btn" id="obGoogleBtn" style="width:100%;background:#272727;color:#fff;font-weight:700;">用 Google 登入</button>
+        <div id="obLoginOk" style="display:none;font-size:13px;color:var(--ink);font-weight:600;">已登入 ✓</div>
+        <div id="obLoginMsg" style="font-size:12px;color:var(--bad);min-height:16px;margin-top:6px;line-height:1.6;"></div>
+      </div>
       <div class="field">
         <label>帳號（例如你的 Gmail，之後可能用來區分資料）</label>
         <input type="text" id="ob_accountId" placeholder="example@gmail.com">
@@ -1927,6 +1920,7 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   var dbApi = null;
   var settingsDbApi = null;
   var usingFallback = false;
+  var loginMode = false; // hosted version: not signed in yet -> splash, then the welcome window asks for Google login
 
   function notify(){ listeners.forEach(function(fn){ fn(trips); }); }
   function onTrips(fn){ listeners.push(fn); fn(trips); }
@@ -2075,6 +2069,9 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   }
 
   function initData(){
+    if(window.__fbAuth){
+      window.__fbAuth.first.then(function(st){ if(st === "out"){ loginMode = true; notifySettings(); } });
+    }
     if(window.claude && window.claude.use){
       window.claude.use("db").then(function(db){
         if(!db){ usingFallback = true; loadLocalTrips(); loadLocalSettings(); loadLocalLabels(); return; }
@@ -3233,9 +3230,18 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   logoutConfirmOverlay.addEventListener("click", function(ev){
     if(ev.target === logoutConfirmOverlay) logoutConfirmOverlay.hidden = true;
   });
+  if(window.__fbAuth){
+    var lgBody = logoutConfirmOverlay.querySelector(".modal-body div");
+    if(lgBody) lgBody.innerHTML = "確認登出？你的資料會留在雲端，下次用 Google 登入就會回來。";
+  }
   document.getElementById("logoutConfirmBtn").addEventListener("click", function(){
     logoutConfirmOverlay.hidden = true;
     closeSettings();
+    if(window.__fbAuth){
+      var done = function(){ location.reload(); };
+      window.__fbAuth.signOut().then(done, done);
+      return;
+    }
     clearAllTrips();
     updateSettings({ accountId: "", profileName: "", onboarded: false });
   });
@@ -3350,7 +3356,53 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
       setThemeModeButtons("ob_themeMode", obChosenThemeMode);
       renderThemeSwatchRow("obThemeSwatchRow");
     }
+    refreshObLogin();
     onboardingOverlay.hidden = false;
+  }
+  function fbUser(){ return window.__fbAuth ? window.__fbAuth.user : null; }
+  function refreshObLogin(){
+    var fld = document.getElementById("obLoginField");
+    if(!fld) return;
+    if(!window.__fbAuth){ fld.hidden = true; return; }
+    fld.hidden = false;
+    var u = fbUser();
+    var gb = document.getElementById("obGoogleBtn");
+    gb.style.display = u ? "none" : "";
+    gb.style.boxShadow = "";
+    document.getElementById("obLoginOk").style.display = u ? "" : "none";
+    var acc = document.getElementById("ob_accountId"), nm = document.getElementById("ob_profileName");
+    if(u){
+      if(u.email) acc.value = u.email;
+      acc.readOnly = !!u.email;
+      if(!nm.value && u.displayName) nm.value = u.displayName;
+      document.getElementById("obLoginMsg").textContent = "";
+    } else {
+      acc.readOnly = false;
+    }
+  }
+  function obLoginWarn(text){
+    var m = document.getElementById("obLoginMsg"), gb = document.getElementById("obGoogleBtn");
+    m.textContent = text;
+    gb.style.boxShadow = text ? "0 0 0 2px var(--bad)" : "";
+    if(text && m.animate){
+      var f = document.getElementById("obLoginField");
+      f.animate([{transform:"translateX(0)"},{transform:"translateX(-7px)"},{transform:"translateX(7px)"},{transform:"translateX(-4px)"},{transform:"translateX(0)"}],{duration:320});
+    }
+  }
+  if(window.__fbAuth){
+    window.__fbAuth.onChange = function(){ refreshObLogin(); };
+    document.getElementById("obGoogleBtn").addEventListener("click", function(){
+      obLoginWarn("");
+      window.__fbAuth.signIn().catch(function(e){
+        var code = (e && e.code) ? String(e.code) : "";
+        var msg = "登入失敗，請再試一次";
+        if(code === "auth/unauthorized-domain") msg = "登入失敗：這個網址還沒加進 Firebase 的「已授權網域」";
+        else if(code === "auth/popup-blocked") msg = "登入視窗被瀏覽器擋住了，請允許彈出視窗後再試";
+        else if(code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") msg = "";
+        obLoginWarn(msg);
+        if(window.console) console.log(e);
+      });
+    });
   }
   document.getElementById("ob_themeMode").addEventListener("click", function(ev){
     var btn = ev.target.closest(".theme-mode-btn");
@@ -3369,6 +3421,10 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     renderThemeSwatchRow("obThemeSwatchRow");
   });
   document.getElementById("onboardingDoneBtn").addEventListener("click", function(){
+    if(window.__fbAuth && !fbUser()){
+      obLoginWarn("請先登入，資料才能記錄與保存");
+      return;
+    }
     updateSettings({
       accountId: document.getElementById("ob_accountId").value,
       profileName: document.getElementById("ob_profileName").value,
