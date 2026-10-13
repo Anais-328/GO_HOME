@@ -34,7 +34,11 @@
     user: null,
     first: first,
     onChange: null,
-    signIn: function(){ return auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); },
+    signIn: function(){
+      var p = new firebase.auth.GoogleAuthProvider();
+      if(p.setCustomParameters) p.setCustomParameters({ prompt: "select_account" });
+      return auth.signInWithPopup(p);
+    },
     signOut: function(){ return auth.signOut(); }
   };
   auth.onAuthStateChanged(function(user){
@@ -511,6 +515,7 @@ body{
 .icon-btn:hover{background:var(--line);}
 .modal-body{padding:16px 18px 4px;display:flex;flex-direction:column;gap:16px;}
 .field{display:flex;flex-direction:column;gap:6px;}
+#obLoginMsg:empty{display:none;}
 .field label{font-size:12px;font-weight:700;color:var(--ink-soft);letter-spacing:.02em;}
 .field input[type=text],.field input[type=number],.field input[type=date],.field input[type=time],.field input[type=month],.field textarea,.field select{
   border:1px solid var(--line);border-radius:9px;padding:9px 10px;font-size:14px;
@@ -1128,13 +1133,16 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     </div>
     <div class="modal-body">
       <div class="field" id="obLoginField" hidden>
-        <label>登入</label>
+        <label>帳號</label>
         <button type="button" class="btn" id="obGoogleBtn" style="width:100%;background:#272727;color:#fff;font-weight:700;">用 Google 登入</button>
-        <div id="obLoginOk" style="display:none;font-size:13px;color:var(--ink);font-weight:600;">已登入 ✓</div>
-        <div id="obLoginMsg" style="font-size:12px;color:var(--bad);min-height:16px;margin-top:6px;line-height:1.6;"></div>
+        <div id="obAccountRow" style="display:none;position:relative;">
+          <input type="text" id="obAccountShow" readonly style="width:100%;padding-right:78px;text-overflow:ellipsis;">
+          <button type="button" id="obSwitchBtn" style="position:absolute;top:50%;right:6px;transform:translateY(-50%);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;color:var(--ink);cursor:pointer;">換帳號</button>
+        </div>
+        <div id="obLoginMsg" style="font-size:12px;color:var(--bad);margin-top:6px;line-height:1.6;"></div>
       </div>
-      <div class="field">
-        <label>帳號（例如你的 Gmail，之後可能用來區分資料）</label>
+      <div class="field" id="obAccountField">
+        <label>帳號</label>
         <input type="text" id="ob_accountId" placeholder="example@gmail.com">
       </div>
       <div class="field">
@@ -3259,6 +3267,11 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     document.getElementById("s_showMoney").checked = settings.showMoney !== false;
     document.getElementById("s_profileName").value = settings.profileName || "";
     document.getElementById("s_accountId").value = settings.accountId || "";
+    if(window.__fbAuth && fbUser()){
+      var sa = document.getElementById("s_accountId");
+      sa.value = fbUser().email || settings.accountId || "";
+      sa.readOnly = true;
+    }
     setThemeModeButtons("s_themeMode", settings.themeMode === "dark" ? "dark" : "light");
     setTileCountButtons();
     renderTilePicker();
@@ -3363,21 +3376,22 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   function refreshObLogin(){
     var fld = document.getElementById("obLoginField");
     if(!fld) return;
-    if(!window.__fbAuth){ fld.hidden = true; return; }
+    var accField = document.getElementById("obAccountField");
+    if(!window.__fbAuth){ fld.hidden = true; if(accField) accField.hidden = false; return; }
     fld.hidden = false;
+    if(accField) accField.hidden = true; // signed in with Google: the account is that email, nothing to type
     var u = fbUser();
-    var gb = document.getElementById("obGoogleBtn");
+    var gb = document.getElementById("obGoogleBtn"), show = document.getElementById("obAccountShow");
     gb.style.display = u ? "none" : "";
     gb.style.boxShadow = "";
-    document.getElementById("obLoginOk").style.display = u ? "" : "none";
-    var acc = document.getElementById("ob_accountId"), nm = document.getElementById("ob_profileName");
+    document.getElementById("obAccountRow").style.display = u ? "" : "none";
+    var nm = document.getElementById("ob_profileName");
     if(u){
-      if(u.email) acc.value = u.email;
-      acc.readOnly = !!u.email;
+      var em = u.email || u.displayName || "";
+      show.value = em;
+      document.getElementById("ob_accountId").value = u.email || "";
       if(!nm.value && u.displayName) nm.value = u.displayName;
       document.getElementById("obLoginMsg").textContent = "";
-    } else {
-      acc.readOnly = false;
     }
   }
   function obLoginWarn(text){
@@ -3391,6 +3405,10 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   }
   if(window.__fbAuth){
     window.__fbAuth.onChange = function(){ refreshObLogin(); };
+    document.getElementById("obSwitchBtn").addEventListener("click", function(){
+      var done = function(){ location.reload(); };
+      window.__fbAuth.signOut().then(done, done);
+    });
     document.getElementById("obGoogleBtn").addEventListener("click", function(){
       obLoginWarn("");
       window.__fbAuth.signIn().catch(function(e){
