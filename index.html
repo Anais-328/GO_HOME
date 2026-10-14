@@ -53,6 +53,7 @@
   var firstResolve, first = new Promise(function(r){ firstResolve = r; });
   window.__fbAuth = {
     user: null,
+    state: null, // null until the sign-in check has answered, then "in" or "out"
     first: first,
     onChange: null,
     signIn: function(){
@@ -64,6 +65,7 @@
   };
   auth.onAuthStateChanged(function(user){
     window.__fbAuth.user = user || null;
+    window.__fbAuth.state = user ? "in" : "out";
     if(user) resolveDb(makeDb(user));
     firstResolve(user ? "in" : "out");
     if(typeof window.__fbAuth.onChange === "function") window.__fbAuth.onChange(user || null);
@@ -979,7 +981,11 @@ body{
   opacity:1;transition:opacity .42s ease;
 }
 #bootVeil.veil-out{opacity:0;pointer-events:none;}
-#syncHint{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:9990;background:rgba(39,39,39,.86);color:#fff;font-size:12px;font-weight:600;padding:6px 14px;border-radius:999px;pointer-events:none;opacity:0;transition:opacity .3s;}
+#syncHint{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:9990;background:rgba(39,39,39,.86);color:#fff;font-size:12px;font-weight:600;padding:6px 14px;border-radius:999px;pointer-events:auto;cursor:pointer;opacity:0;transition:opacity .3s;text-align:center;line-height:1.5;}
+#syncHint small{display:block;font-size:10px;font-weight:500;opacity:.75;}
+.boot-status{margin-top:4px;font-size:12px;font-weight:600;color:#8a867d;text-align:center;line-height:1.7;cursor:pointer;opacity:0;animation:bootStatusIn .5s ease .1s forwards;}
+.boot-status small{display:block;font-size:10px;font-weight:500;opacity:.8;}
+@keyframes bootStatusIn{to{opacity:1;}}
 #syncHint.on{opacity:1;}
 #loginCover{position:fixed;inset:0;z-index:9998;background:#faf9f5;display:flex;align-items:center;justify-content:center;opacity:1;}
 #loginCover.off{opacity:0;transition:opacity .5s ease;pointer-events:none;}
@@ -2108,10 +2114,22 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
      no trips yet, copy them up once, then park the local copy under a backup key so they can't be
      copied into a different account later. */
   /* A small "connecting" pill, shown only if the cloud is slow to answer at start-up. */
+  function syncReason(){
+    var a = window.__fbAuth;
+    if(!a) return "沒有雲端設定";
+    if(!a.state) return "登入檢查沒有回應";
+    if(a.state === "in") return "雲端資料庫沒有回應";
+    return "尚未登入";
+  }
   function showSyncHint(on){
     var el = document.getElementById("syncHint");
     if(on){
-      if(!el){ el = document.createElement("div"); el.id = "syncHint"; el.textContent = "正在連線雲端…"; document.body.appendChild(el); }
+      if(!el){
+        el = document.createElement("div"); el.id = "syncHint";
+        el.innerHTML = '正在連線雲端…<small>' + syncReason() + '・點一下重新連線</small>';
+        el.addEventListener("click", function(){ location.reload(); });
+        document.body.appendChild(el);
+      }
       requestAnimationFrame(function(){ el.classList.add("on"); });
     } else if(el){
       el.classList.remove("on");
@@ -3508,13 +3526,14 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     }
   }
   if(window.__fbAuth){
-    window.__fbAuth.onChange = function(u){ if(u && loginMode) loginCoverOn(); refreshObLogin(); };
+    window.__fbAuth.onChange = function(u){ if(u){ loginBusy = false; if(loginMode) loginCoverOn(); } refreshObLogin(); };
     document.getElementById("obSwitchBtn").addEventListener("click", function(){
       var done = function(){ location.reload(); };
       window.__fbAuth.signOut().then(done, done);
     });
     document.getElementById("obGoogleBtn").addEventListener("click", function(){
       obLoginWarn("");
+      loginBusy = true; setTimeout(function(){ loginBusy = false; }, 180000);
       window.__fbAuth.signIn().catch(function(e){
         var code = (e && e.code) ? String(e.code) : "";
         var msg = "登入失敗，請再試一次";
@@ -4263,30 +4282,44 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   /* ---------------- boot ---------------- */
   initData();
 
-  /* Safety net: if the cloud (sign-in check or database) has not answered after a few seconds, show the
-     app from this device's saved copy instead of an empty white screen, and say we are still connecting. */
+  /* Safety net, stage 1 (after 4s): the cloud has not answered. Rather than a blank screen, show the logo
+     and say what we are waiting for (tap to retry). Stage 2 (after 20s): give up waiting and show the app
+     from this device's saved copy, with a small "connecting" pill; it fills in by itself once the cloud answers. */
+  setTimeout(function(){
+    if(bootVeilLifted) return;
+    try{ var raw = localStorage.getItem(SETTINGS_LOCAL_KEY); if(raw) Object.assign(settings, JSON.parse(raw)); }catch(e){}
+    applyThemeMode();
+    revealBootContent();
+    var bc = document.querySelector("#bootVeil .boot-content");
+    if(bc && !document.querySelector("#bootVeil .boot-status")){
+      var st = document.createElement("div"); st.className = "boot-status";
+      st.innerHTML = '正在連線雲端…<small>' + syncReason() + '・點一下重新連線</small>';
+      st.addEventListener("click", function(){ location.reload(); });
+      bc.appendChild(st);
+    }
+  }, 4000);
   setTimeout(function(){
     if(bootVeilLifted) return;
     showSyncHint(true);
     loadLocalSettings();
-  }, 5000);
+  }, 20000);
 
   /* Opening the app again from the home screen resumes the old page, so the splash and greeting would
      never play again. After the app has been away a little while, restart it so they play like a fresh open
      (data comes straight back from the cache). A form that is open is never thrown away. */
   var REPLAY_AFTER_MS = 10000;
   var hiddenAt = 0;
+  var loginBusy = false; // true while the Google sign-in window is open — never restart the page under it
   function maybeReplay(){
     if(!hiddenAt) return;
     var away = Date.now() - hiddenAt; hiddenAt = 0;
     if(away < REPLAY_AFTER_MS) return;
-    if(document.querySelector(".overlay:not([hidden])")) return;
+    if(loginBusy || document.querySelector(".overlay:not([hidden])")) return;
     location.reload();
   }
   document.addEventListener("visibilitychange", function(){
     if(document.hidden){ hiddenAt = Date.now(); } else { maybeReplay(); }
   });
-  window.addEventListener("pageshow", function(ev){ if(ev.persisted){ location.reload(); } });
 
   /* ---------------- yearly clean-up: only the last three calendar years are kept ---------------- */
   var purgeState = null;
