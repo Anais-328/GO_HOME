@@ -22,11 +22,30 @@
   try{ fs.enablePersistence({ synchronizeTabs: true }).catch(function(){}); }catch(e){}
   var resolveDb;
   var ready = new Promise(function(r){ resolveDb = r; });
+  // Firestore refuses "undefined" values; the page only ever stores plain JSON, so drop them before every write.
+  function clean(d){ return JSON.parse(JSON.stringify(d)); }
+  function wrapDoc(ref){
+    return {
+      id: ref.id,
+      set: function(d){ return ref.set(clean(d)); },
+      update: function(d){ return ref.update(clean(d)); },
+      delete: function(){ return ref.delete(); },
+      onSnapshot: function(a, b){ return ref.onSnapshot(a, b); }
+    };
+  }
+  function wrapCol(col){
+    return {
+      doc: function(id){ return wrapDoc(id ? col.doc(id) : col.doc()); },
+      limit: function(n){ return wrapCol(col.limit(n)); },
+      orderBy: function(f, dir){ return wrapCol(col.orderBy(f, dir)); },
+      onSnapshot: function(a, b){ return col.onSnapshot(a, b); }
+    };
+  }
   function makeDb(user){
     var root = fs.collection("users").doc(user.uid);
     return {
-      collection: function(name){ return root.collection(name); },
-      doc: function(path){ return root.doc(path); }
+      collection: function(name){ return wrapCol(root.collection(name)); },
+      doc: function(path){ return wrapDoc(root.doc(path)); }
     };
   }
   var firstResolve, first = new Promise(function(r){ firstResolve = r; });
@@ -2084,9 +2103,15 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
       window.claude.use("db").then(function(db){
         if(!db){ usingFallback = true; loadLocalTrips(); loadLocalSettings(); loadLocalLabels(); return; }
         dbApi = db;
-        dbApi.collection("trips").orderBy("date","asc").limit(500).onSnapshot(
+        dbApi.collection("trips").limit(1000).onSnapshot(
           function(snap){
             trips = applyPending(snap.docs.map(function(d){ var data = Object.assign({}, d.data() || {}); data.id = d.id; return data; }));
+            // trips carry their dates inside legs[], so order them here (the database has no top-level "date" field to sort by)
+            trips.sort(function(a,b){
+              function first(t){ var ds = (t.legs||[]).map(function(l){ return l.date||""; }).filter(Boolean).sort(); return ds[0] || ""; }
+              var fa = first(a), fb = first(b);
+              return fa < fb ? -1 : (fa > fb ? 1 : 0);
+            });
             notify();
           },
           function(){ usingFallback = true; loadLocalTrips(); }
