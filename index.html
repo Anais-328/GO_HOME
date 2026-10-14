@@ -45,7 +45,7 @@
     var root = fs.collection("users").doc(user.uid);
     return {
       collection: function(name){ return wrapCol(root.collection(name)); },
-      doc: function(path){ return wrapDoc(root.doc(path)); }
+      doc: function(path){ return wrapDoc(fs.doc("users/" + user.uid + "/" + path)); }
     };
   }
   var firstResolve, first = new Promise(function(r){ firstResolve = r; });
@@ -2095,6 +2095,38 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     else { saveLocalLabels(); }
   }
 
+  /* One-time rescue: an earlier build could silently fall back to this device's own storage, so trips
+     (and stickers) entered then exist only here. On the first real (server) answer, if the cloud has
+     no trips yet, copy them up once, then park the local copy under a backup key so they can't be
+     copied into a different account later. */
+  var MIGRATED_KEY = "home-system-migrated-v1";
+  function migrateLocalOnce(snap){
+    try{
+      if(!dbApi || usingFallback) return;
+      if(snap.metadata && snap.metadata.fromCache) return;
+      if(localStorage.getItem(MIGRATED_KEY)) return;
+      if(snap.docs && snap.docs.length) { localStorage.setItem(MIGRATED_KEY, "skip"); return; }
+      var lt = []; var ll = [];
+      try{ lt = JSON.parse(localStorage.getItem(TRIPS_LOCAL_KEY) || "[]") || []; }catch(e){}
+      try{ ll = JSON.parse(localStorage.getItem(LABELS_LOCAL_KEY) || "[]") || []; }catch(e){}
+      lt = lt.filter(function(t){ return t && !t.demo && t.legs && t.legs.length; });
+      localStorage.setItem(MIGRATED_KEY, "1");
+      if(!lt.length && !ll.length) return;
+      lt.forEach(function(t){
+        var d = Object.assign({}, t); delete d.id; if(!d.createdAt) d.createdAt = Date.now();
+        dbApi.collection("trips").doc().set(d).catch(function(){});
+      });
+      ll.forEach(function(l){
+        if(l && l.id){ dbApi.doc("labels/"+l.id).set(l).catch(function(){}); }
+      });
+      try{
+        localStorage.setItem(TRIPS_LOCAL_KEY + "-backup", localStorage.getItem(TRIPS_LOCAL_KEY) || "[]");
+        localStorage.setItem(LABELS_LOCAL_KEY + "-backup", localStorage.getItem(LABELS_LOCAL_KEY) || "[]");
+        localStorage.removeItem(TRIPS_LOCAL_KEY); localStorage.removeItem(LABELS_LOCAL_KEY);
+      }catch(e){}
+    }catch(e){}
+  }
+
   function initData(){
     if(window.__fbAuth){
       window.__fbAuth.first.then(function(st){ if(st === "out"){ loginMode = true; notifySettings(); } });
@@ -2105,6 +2137,7 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
         dbApi = db;
         dbApi.collection("trips").limit(1000).onSnapshot(
           function(snap){
+            migrateLocalOnce(snap);
             trips = applyPending(snap.docs.map(function(d){ var data = Object.assign({}, d.data() || {}); data.id = d.id; return data; }));
             // trips carry their dates inside legs[], so order them here (the database has no top-level "date" field to sort by)
             trips.sort(function(a,b){
