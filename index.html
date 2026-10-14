@@ -2114,9 +2114,27 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
      no trips yet, copy them up once, then park the local copy under a backup key so they can't be
      copied into a different account later. */
   /* A small "connecting" pill, shown only if the cloud is slow to answer at start-up. */
+  /* Two tiny health checks run at start-up so the "connecting" message can say what is actually wrong:
+     is the phone's own storage (IndexedDB, used by the sign-in and the database) answering, and can the
+     Google servers be reached at all? */
+  var idbProbe = "wait", netProbe = "wait";
+  try{
+    var rq = indexedDB.open("home-probe");
+    rq.onsuccess = function(){ idbProbe = "ok"; try{ rq.result.close(); indexedDB.deleteDatabase("home-probe"); }catch(e){} };
+    rq.onerror = function(){ idbProbe = "bad"; };
+    rq.onblocked = function(){ idbProbe = "bad"; };
+  }catch(e){ idbProbe = "bad"; }
+  try{
+    var ctl = ("AbortController" in window) ? new AbortController() : null;
+    var tm = setTimeout(function(){ if(netProbe === "wait"){ netProbe = "bad"; if(ctl) ctl.abort(); } }, 6000);
+    fetch("https://firestore.googleapis.com/", { mode: "no-cors", cache: "no-store", signal: ctl ? ctl.signal : undefined })
+      .then(function(){ netProbe = "ok"; clearTimeout(tm); }, function(){ netProbe = "bad"; clearTimeout(tm); });
+  }catch(e){ netProbe = "bad"; }
   function syncReason(){
     var a = window.__fbAuth;
     if(!a) return "沒有雲端設定";
+    if(idbProbe !== "ok") return "手機的儲存空間沒有回應";
+    if(netProbe === "bad") return "連不到 Google 伺服器";
     if(!a.state) return "登入檢查沒有回應";
     if(a.state === "in") return "雲端資料庫沒有回應";
     return "尚未登入";
