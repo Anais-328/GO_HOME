@@ -500,9 +500,9 @@ body{
 .modal-body,.modal-body *{min-width:0;}
 @media (min-width:640px){ .modal{border-radius:18px;} }
 .modal.small{max-width:400px;}
-#onboardingOverlay,#settingsOverlay,#logoutConfirmOverlay,#labelEditOverlay,#purgeOverlay{align-items:center;padding:20px;}
-#onboardingOverlay .modal,#settingsOverlay .modal,#logoutConfirmOverlay .modal,#labelEditOverlay .modal,#purgeOverlay .modal{border-radius:18px;}
-#logoutConfirmOverlay,#labelEditOverlay,#purgeOverlay{z-index:60;}
+#onboardingOverlay,#settingsOverlay,#logoutConfirmOverlay,#clearDataOverlay,#labelEditOverlay,#purgeOverlay{align-items:center;padding:20px;}
+#onboardingOverlay .modal,#settingsOverlay .modal,#logoutConfirmOverlay .modal,#clearDataOverlay .modal,#labelEditOverlay .modal,#purgeOverlay .modal{border-radius:18px;}
+#logoutConfirmOverlay,#clearDataOverlay,#labelEditOverlay,#purgeOverlay{z-index:60;}
 
 /* modal entrance motion — replays every time an overlay's `hidden` toggles
    off, since display:none→block resets a running CSS animation for free.
@@ -516,7 +516,7 @@ body{
 @keyframes modalPopIn{ from{opacity:0;margin-top:14px;} to{opacity:1;margin-top:0;} }
 .overlay{animation:overlayFadeIn .2s ease;}
 .modal{animation:modalSlideUp .3s cubic-bezier(.2,.8,.2,1);margin-top:0;}
-#onboardingOverlay .modal,#settingsOverlay .modal,#logoutConfirmOverlay .modal,#labelEditOverlay .modal,#purgeOverlay .modal{
+#onboardingOverlay .modal,#settingsOverlay .modal,#logoutConfirmOverlay .modal,#clearDataOverlay .modal,#labelEditOverlay .modal,#purgeOverlay .modal{
   animation:modalPopIn .3s cubic-bezier(.2,.8,.2,1);
 }
 @media (prefers-reduced-motion: reduce){
@@ -1229,6 +1229,21 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   </div>
 </div>
 
+<div class="overlay" id="clearDataOverlay" hidden>
+  <div class="modal small">
+    <div class="modal-head">
+      <h2>清除所有行程資料</h2>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:14px;line-height:1.7;color:var(--ink);">這會刪掉這個帳號雲端上的<b>所有行程和標籤貼紙</b>（目前有 <b id="clearDataCount"></b>），<b>無法復原</b>。主題顏色和設定不會動。</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--line);" id="clearDataCancelBtn">取消</button>
+      <button class="btn" style="background:var(--bad);color:#fff;" id="clearDataConfirmBtn">全部刪除</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="purgeOverlay" hidden>
   <div class="modal small">
     <div class="modal-head">
@@ -1375,6 +1390,7 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
           <input type="text" id="s_profileName" placeholder="怎麼稱呼你？">
         </div>
         <button type="button" class="theme-reset-btn" id="logoutBtn" style="align-self:flex-start;">登出</button>
+        <button type="button" class="theme-reset-btn" id="clearDataBtn" style="align-self:flex-start;color:var(--bad);">清除所有行程資料</button>
       </div>
 
       <div class="settings-group set-panel" data-panel="page">
@@ -3420,6 +3436,31 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     }
     clearAllTrips();
     updateSettings({ accountId: "", profileName: "", onboarded: false });
+  });
+  /* 清除所有行程資料: wipes every trip + label of this account (settings/theme stay) */
+  var clearDataOverlay = document.getElementById("clearDataOverlay");
+  document.getElementById("clearDataBtn").addEventListener("click", function(){
+    document.getElementById("clearDataCount").textContent = trips.length + " 筆行程、" + labels.length + " 個標籤貼紙";
+    clearDataOverlay.hidden = false;
+  });
+  document.getElementById("clearDataCancelBtn").addEventListener("click", function(){ clearDataOverlay.hidden = true; });
+  clearDataOverlay.addEventListener("click", function(ev){ if(ev.target === clearDataOverlay) clearDataOverlay.hidden = true; });
+  document.getElementById("clearDataConfirmBtn").addEventListener("click", function(){
+    var btn = this; btn.disabled = true; btn.textContent = "刪除中…";
+    var jobs = trips.slice().map(function(t){ return dataDelete(t.id); });
+    labels.slice().forEach(function(l){ labelDelete(l.id); });
+    var finished = false;
+    var finish = function(){
+      if(finished) return; finished = true;
+      ["home-system-trips-v2","home-system-labels-v1","home-system-trips-v2-backup","home-system-labels-v1-backup"].forEach(function(k){
+        try{ localStorage.removeItem(k); }catch(e){}
+      });
+      btn.disabled = false; btn.textContent = "全部刪除";
+      clearDataOverlay.hidden = true;
+      closeSettings();
+    };
+    Promise.all(jobs).then(finish, finish);
+    setTimeout(finish, 4000); // offline: the deletes are queued and go out later; don't leave the button stuck
   });
   document.getElementById("s_themeMode").addEventListener("click", function(ev){
     var btn = ev.target.closest(".theme-mode-btn");
