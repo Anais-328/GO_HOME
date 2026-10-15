@@ -2376,7 +2376,6 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
       var dayLegs = (legsByDate[ds] || []).filter(function(l){ return l.status !== "cancelled"; });
       html += '<div class="cal-cell'+(isToday?' is-today':'')+(isDayOff?' is-dayoff':'')+'"'+(hName?' title="'+escapeHtml(hName)+'"':'')+' data-date="'+ds+'">';
       html += '<div class="cell-top"><div class="daynum">'+cellDate.getDate()+'</div>'+
-                (hName ? '<div class="holiday-name">'+escapeHtml(hName)+'</div>' : '')+
               '</div>';
       var MAX_STICKERS = 6;
       dayLegs.slice(0, MAX_STICKERS).forEach(function(l, idx){
