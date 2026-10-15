@@ -1,8 +1,10 @@
 /* 回家吧 — 離線支援：第一次連網開啟後，沒網路也能開啟並使用 */
 const CACHE = "go-home-v1";
 const CORE = ["./", "./index.html", "./firebase-config.js", "./manifest.json", "./icons/icon-192.png", "./icons/icon-512.png", "./apple-touch-icon.png", "./assets/Yozai-Regular.ttf"];
+// 貼紙圖片：安裝時一次存好，沒網路也看得到
+const STICKERS = ["car", "bus", "tram", "plane", "ship", "bike", "scooter", "taxi", "train", "map", "pin", "suitcase", "camera", "passport", "tickets", "ticket", "calendar", "clock", "coffee", "boba", "juice", "cake", "ramen", "rice", "cutlery", "pizza", "burger", "pin-heart", "music", "headphones", "book", "laptop", "cat", "night", "sprout", "bolt", "flower", "smile", "heart", "star", "rainbow", "sun", "party", "sparkles", "paws", "clover", "tulip-pink", "cloud", "moon", "bow", "umbrella", "tulip", "flower-orange", "cherry", "dolphin", "bear", "bunny", "planet", "butterfly", "snowflake", "mushroom", "soda", "star-blue", "heart-pink", "lavender"].map(n => "./assets/stickers/" + n + ".png");
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => Promise.all(CORE.map(u => c.add(u).catch(() => {})))));
+  e.waitUntil(caches.open(CACHE).then(c => Promise.all(CORE.concat(STICKERS).map(u => c.add(u).catch(() => {})))));
   self.skipWaiting();
 });
 self.addEventListener("activate", e => {

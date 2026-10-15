@@ -404,6 +404,8 @@ body{
   user-select:none;-webkit-user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none;
 }
 .badge.badge-dragging{transform:translate(-50%,-50%) translateY(-6px) rotate(0deg) scale(1.35);z-index:4;}
+.badge.has-img{padding:0;width:36px;min-width:36px;height:36px;line-height:0;}
+.badge.has-img .stk-img{width:36px;height:36px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.18));}
 .badge::after{
   content:"";position:absolute;right:0px;bottom:2px;width:7px;height:7px;border-radius:50%;
 }
@@ -419,6 +421,8 @@ body{
   .cal-cell{min-height:58px;padding:5px 3px 3px;}
   .holiday-name{display:none;}
   .badge{min-width:24px;height:24px;line-height:24px;font-size:21px;}
+  .badge.has-img{width:30px;min-width:30px;height:30px;line-height:0;}
+  .badge.has-img .stk-img{width:30px;height:30px;}
   .more-hint{line-height:17px;}
 }
 
@@ -546,13 +550,22 @@ body{
 }
 .field input[type=month]{color-scheme:light dark;}
 .field textarea{resize:vertical;min-height:48px;}
-.tag-quick{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;}
-.tag-quick-btn{
-  width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--surface-2);
-  font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+/* sticker picker: ONE row, swipe left/right, loops forever (the list is repeated 5×
+   and silently re-centred when the finger stops, so there is never an end) */
+.tag-quick{
+  position:relative;display:flex;flex-wrap:nowrap;gap:8px;margin:2px -18px 0;padding:4px 18px;
+  overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;
+  scrollbar-width:none;touch-action:pan-x pan-y;cursor:grab;
 }
-.tag-quick-btn:hover{background:var(--surface);border-color:var(--line-strong);}
+.tag-quick::-webkit-scrollbar{display:none;}
+.tag-quick.dragging{cursor:grabbing;}
+.tag-quick-btn{
+  flex:none;width:50px;height:50px;padding:0;border-radius:13px;border:1.5px solid transparent;background:var(--surface-2);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;
+}
+.tag-quick-btn img{width:40px;height:40px;object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-select:none;}
 .tag-quick-btn.active{background:var(--accent-soft);border-color:var(--accent);}
+.stk-img{display:block;object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-select:none;-webkit-user-select:none;}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
 @media (max-width:460px){ .row3{grid-template-columns:1fr 1fr;} }
@@ -753,6 +766,7 @@ body{
 .tk-w{font-size:10.5px;font-weight:700;letter-spacing:.06em;opacity:.85;}
 .tk-d{font-size:24px;font-weight:700;line-height:1.1;}
 .tk-tag{font-size:22px;line-height:1.2;min-height:4px;}
+.tk-tag .stk-img{width:30px;height:30px;margin:0 auto;}
 .tk-body{flex:1;min-width:0;padding:12px 14px 12px 14px;display:flex;flex-direction:column;gap:7px;}
 .tk-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
 .tk-route{font-size:15px;font-weight:700;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -1484,7 +1498,16 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   }
   /* cute "sticker" choices for marking a trip on the calendar — a placeholder set
      until custom sticker images are added. */
-  var STICKER_ICONS = ["🌸","😊","❤️","⭐","🌈","☀️","🎉","✨","🐾","🍀"];
+  var STICKER_NAMES = ["car","bus","tram","plane","ship","bike","scooter","taxi","train","map","pin","suitcase","camera","passport","tickets","ticket","calendar","clock","coffee","boba","juice","cake","ramen","rice","cutlery","pizza","burger","pin-heart","music","headphones","book","laptop","cat","night","sprout","bolt","flower","smile","heart","star","rainbow","sun","party","sparkles","paws","clover","tulip-pink","cloud","moon","bow","umbrella","tulip","flower-orange","cherry","dolphin","bear","bunny","planet","butterfly","snowflake","mushroom","soda","star-blue","heart-pink","lavender"];
+  /* a picked sticker is saved as the text "stk:<name>" in the trip's tagLabel (older
+     trips may still hold an emoji or 1-2 typed characters; those keep showing as text) */
+  function stkNameOf(v){
+    var m = /^stk:([a-z0-9-]+)$/.exec(v || "");
+    return (m && STICKER_NAMES.indexOf(m[1]) >= 0) ? m[1] : null;
+  }
+  function stkImgHtml(name){
+    return '<img class="stk-img" src="assets/stickers/'+name+'.png" alt="" draggable="false" decoding="async">';
+  }
   var STATUS_META = {
     unpaid:{ label:"未付款" }, paid:{ label:"已付款" },
     cancelled:{ label:"已取消" }, completed:{ label:"已完成" }
@@ -1550,19 +1573,25 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
      so every trip still shows something without extra data entry. */
   function legTag(leg){
     var custom = (leg.tagLabel || "").trim();
-    if(custom) return custom.slice(0,2);
+    if(custom && !/^stk:/.test(custom)) return custom.slice(0,2);
     var seg0 = splitSegs(leg).main;
     var modes = allModes();
     var meta = seg0 ? (modes[seg0.mode] || modes.other) : modes.other;
     return meta.icon;
   }
+  /* same as legTag, but as ready-to-insert HTML: the sticker picture when one was picked */
+  function legTagHtml(leg){
+    var nm = stkNameOf((leg.tagLabel || "").trim());
+    return nm ? stkImgHtml(nm) : escapeHtml(legTag(leg));
+  }
+  function legHasImg(leg){ return !!stkNameOf((leg.tagLabel || "").trim()); }
   /* freeform "sticker" placement on the calendar: a leg can carry its own
      stickerX/stickerY (0..1, relative to its day cell) once the person has
      dragged it; until then, spread same-day stickers across a few preset
      spots so they don't all land exactly on top of each other. */
   var STICKER_CLAMP_MIN = 0.14, STICKER_CLAMP_MAX = 0.86;
   var DEFAULT_STICKER_SPOTS = [
-    {x:.5,y:.6},{x:.28,y:.42},{x:.72,y:.42},{x:.28,y:.8},{x:.72,y:.8},{x:.5,y:.85}
+    {x:.5,y:.66},{x:.28,y:.42},{x:.72,y:.42},{x:.28,y:.8},{x:.72,y:.8},{x:.5,y:.85}
   ];
   function clampPct(v){ return Math.max(STICKER_CLAMP_MIN, Math.min(STICKER_CLAMP_MAX, v)); }
   function stickerPosFor(leg, index){
@@ -2385,8 +2414,8 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
         var tip = routeText+" "+tr.start+"–"+tr.end;
         var pos = stickerPosFor(l, idx);
         var rot = [-8,7,-3,6,-5,4][idx % 6];
-        html += '<span class="badge role-'+l.role+' st-'+dstatus+(l.demo?' demo':'')+'" data-trip-id="'+l.tripId+'" data-leg-index="'+l.legIndex+'" data-demo="'+(l.demo?"1":"0")+'" data-rot="'+rot+'" draggable="false"'+
-                  ' style="left:'+(pos.x*100).toFixed(1)+'%;top:'+(pos.y*100).toFixed(1)+'%;--rot:'+rot+'deg" title="'+escapeHtml(tip)+'">'+escapeHtml(legTag(l))+'</span>';
+        html += '<span class="badge role-'+l.role+' st-'+dstatus+(l.demo?' demo':'')+(legHasImg(l)?' has-img':'')+'" data-trip-id="'+l.tripId+'" data-leg-index="'+l.legIndex+'" data-demo="'+(l.demo?"1":"0")+'" data-rot="'+rot+'" draggable="false"'+
+                  ' style="left:'+(pos.x*100).toFixed(1)+'%;top:'+(pos.y*100).toFixed(1)+'%;--rot:'+rot+'deg" title="'+escapeHtml(tip)+'">'+legTagHtml(l)+'</span>';
       });
       if(dayLegs.length > MAX_STICKERS){
         html += '<span class="more-hint" style="left:88%;top:18%">+'+(dayLegs.length-MAX_STICKERS)+'</span>';
@@ -3060,12 +3089,12 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
         return '<div class="tk-seg"><span class="m"><i>'+meta2.icon+'</i>'+meta2.label+(sg.no?(' '+escapeHtml(sg.no)):'')+'</span>'+
           '<span class="t">'+(sg.depart||"--:--")+' → '+(sg.arrive||"--:--")+'</span></div>';
       }).join("");
-      var tagEmoji = legTag(l);
+      var tagEmoji = legTagHtml(l);
       return '<div class="trip-card ticket role-'+l.role+(l.demo?' demo':'')+(extra?' '+extra:'')+'" data-trip-id="'+l.tripId+'" data-demo="'+(l.demo?"1":"0")+'">'+
         '<div class="tk-stub">'+
           '<div class="tk-d mono">'+dt.getDate()+'</div>'+
           '<div class="tk-w">週'+WEEKDAY_NAMES[dt.getDay()]+'</div>'+
-          '<div class="tk-tag">'+(tagEmoji ? escapeHtml(tagEmoji) : '')+'</div>'+
+          '<div class="tk-tag">'+(tagEmoji || '')+'</div>'+
         '</div>'+
         '<div class="tk-body">'+
           '<div class="tk-head">'+
@@ -4002,22 +4031,84 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     renderLegForms();
     overlay.hidden = false;
     resetSheetScroll(overlay);
+    positionTagStrip();
   }
   function closeModal(){ overlay.hidden = true; goToToday(false); }
 
   /* icon-only sticker picker (no free-text typing; tap to pick, tap again to clear) */
-  function renderTagQuick(){
-    var current = document.getElementById("f_tripTagLabel").value;
-    document.getElementById("tripTagQuick").innerHTML = STICKER_ICONS.map(function(icon){
-      return '<button type="button" class="tag-quick-btn'+(icon===current?' active':'')+'" data-icon="'+icon+'">'+icon+'</button>';
+  /* One endless row: the sticker list is laid out TAG_COPIES times back to back. Whenever
+     scrolling settles (or a new touch starts) the strip is jumped, invisibly, by whole list
+     lengths so it sits in the middle copy again — there is no end to reach in either direction. */
+  var TAG_COPIES = 5;
+  var tagStrip = document.getElementById("tripTagQuick");
+  (function buildTagStrip(){
+    var one = STICKER_NAMES.map(function(nm){
+      return '<button type="button" class="tag-quick-btn" data-name="'+nm+'" aria-label="貼紙 '+nm+'">'+stkImgHtml(nm)+'</button>';
     }).join('');
+    var all = "";
+    for(var i=0;i<TAG_COPIES;i++) all += one;
+    tagStrip.innerHTML = all;
+  })();
+  function tagItems(){ return tagStrip.querySelectorAll(".tag-quick-btn"); }
+  function tagSetWidth(){
+    var it = tagItems(), n = STICKER_NAMES.length;
+    return it.length > n ? it[n].offsetLeft - it[0].offsetLeft : 0;
   }
-  document.getElementById("tripTagQuick").addEventListener("click", function(ev){
+  function renderTagQuick(){
+    var cur = stkNameOf(document.getElementById("f_tripTagLabel").value);
+    tagItems().forEach(function(b){ b.classList.toggle("active", b.getAttribute("data-name") === cur); });
+  }
+  /* put the strip in the middle copy (called once the sheet is visible, so widths are real);
+     if a sticker is already picked, scroll so it sits in the middle of the row */
+  function positionTagStrip(){
+    var it = tagItems(), n = STICKER_NAMES.length, w = tagSetWidth();
+    if(!w) return;
+    var cur = stkNameOf(document.getElementById("f_tripTagLabel").value);
+    var idx = cur ? STICKER_NAMES.indexOf(cur) : 0;
+    var target = it[2*n + idx];
+    tagStrip.scrollLeft = cur
+      ? target.offsetLeft - (tagStrip.clientWidth - target.offsetWidth)/2
+      : it[2*n].offsetLeft - it[0].offsetLeft;
+  }
+  function recenterTagStrip(){
+    var w = tagSetWidth();
+    if(!w) return;
+    var k = Math.floor((tagStrip.scrollLeft + 1) / w) - 2;
+    if(k) tagStrip.scrollLeft = tagStrip.scrollLeft - k * w;
+  }
+  var tagSettle = null;
+  tagStrip.addEventListener("scroll", function(){
+    clearTimeout(tagSettle);
+    tagSettle = setTimeout(recenterTagStrip, 140);
+  }, { passive: true });
+  // a new touch starting near an edge: re-centre first, so there is always plenty of room
+  tagStrip.addEventListener("touchstart", function(){ clearTimeout(tagSettle); recenterTagStrip(); }, { passive: true });
+  // mouse users (desktop) can drag the row with the pointer too
+  (function(){
+    var down = false, sx = 0, sl = 0, moved = false;
+    tagStrip.addEventListener("pointerdown", function(ev){
+      if(ev.pointerType !== "mouse" || ev.button !== 0) return;
+      down = true; moved = false; sx = ev.clientX; sl = tagStrip.scrollLeft; recenterTagStrip(); sl = tagStrip.scrollLeft;
+    });
+    window.addEventListener("pointermove", function(ev){
+      if(!down) return;
+      var dx = ev.clientX - sx;
+      if(Math.abs(dx) > 4){ moved = true; tagStrip.classList.add("dragging"); }
+      if(moved) tagStrip.scrollLeft = sl - dx;
+    });
+    window.addEventListener("pointerup", function(){
+      if(!down) return;
+      down = false; tagStrip.classList.remove("dragging");
+      if(moved){ tagStrip._noClick = true; setTimeout(function(){ tagStrip._noClick = false; }, 0); }
+    });
+  })();
+  tagStrip.addEventListener("click", function(ev){
+    if(tagStrip._noClick) return;
     var btn = ev.target.closest(".tag-quick-btn");
     if(!btn) return;
-    var icon = btn.getAttribute("data-icon");
-    var current = document.getElementById("f_tripTagLabel").value;
-    document.getElementById("f_tripTagLabel").value = (current === icon) ? "" : icon;
+    var nm = btn.getAttribute("data-name");
+    var field = document.getElementById("f_tripTagLabel");
+    field.value = (stkNameOf(field.value) === nm) ? "" : "stk:" + nm;
     renderTagQuick();
   });
 
@@ -4279,7 +4370,7 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     var data = {
       type: formTripType, legs: legs,
       notes: document.getElementById("f_notes").value.trim(),
-      tagLabel: document.getElementById("f_tripTagLabel").value.trim().slice(0,4)
+      tagLabel: (function(v){ return stkNameOf(v) ? v : v.slice(0,4); })(document.getElementById("f_tripTagLabel").value.trim())
     };
     var p = state.editingTripId ? dataUpdate(state.editingTripId, data) : dataAdd(data);
     // the trip already shows up locally the instant it is saved (see
