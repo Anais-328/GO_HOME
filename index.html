@@ -16,7 +16,9 @@
 <script>
 (function(){
   var cfg = window.FIREBASE_CONFIG;
-  if(!cfg || !cfg.apiKey || String(cfg.apiKey).indexOf("貼上") === 0 || !window.firebase) return;
+  if(!cfg || !cfg.apiKey || String(cfg.apiKey).indexOf("貼上") === 0) return;
+  // the cloud libraries didn't load (e.g. offline before they were ever saved): say so instead of silently looking empty
+  if(!window.firebase){ window.__fbMissing = true; return; }
   try{ firebase.initializeApp(cfg); }catch(e){ return; }
   var auth = firebase.auth(), fs = firebase.firestore();
   // Some phone browsers block Firestore's default streaming connection; let it fall back to plain polling by itself.
@@ -2279,6 +2281,7 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
   }catch(e){ netProbe = "bad"; }
   function syncReason(){
     var a = window.__fbAuth;
+    if(!a && window.__fbMissing) return "雲端元件還沒存好，連上網路開一次就會好";
     if(!a) return "沒有雲端設定";
     if(idbProbe !== "ok") return "手機的儲存空間沒有回應";
     if(netProbe === "bad") return "連不到 Google 伺服器";
@@ -2291,7 +2294,7 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
     if(on){
       if(!el){
         el = document.createElement("div"); el.id = "syncHint";
-        el.innerHTML = '正在連線雲端…<small>' + syncReason() + '・點一下重新連線</small>';
+        el.innerHTML = (window.__fbMissing ? '目前是離線模式' : '正在連線雲端…') + '<small>' + syncReason() + '・點一下重新連線</small>';
         el.addEventListener("click", function(){ location.reload(); });
         document.body.appendChild(el);
       }
@@ -4544,6 +4547,7 @@ m285 -468 c156 -77 462 -324 664 -535 72 -75 73 -85 4 -67 -115 29 -297 40
 
   /* ---------------- boot ---------------- */
   initData();
+  if(window.__fbMissing) setTimeout(function(){ showSyncHint(true); }, 800);
 
   /* Safety net, stage 1 (after 4s): the cloud has not answered. Rather than a blank screen, show the logo
      and say what we are waiting for (tap to retry). Stage 2 (after 20s): give up waiting and show the app
